@@ -6,15 +6,16 @@ app.set('view engine', 'ejs');
 app.use('/public', express.static('public'));
 const methodOverride = require('method-override');
 app.use(methodOverride('_method'));
+require('dotenv').config()
 
 var db;
 
-MongoClient.connect('mongodb+srv://rbgml152637:ghkd4059@cluster0.hb9ewxn.mongodb.net/?retryWrites=true&w=majority', function(에러, client){
+MongoClient.connect(process.env.DB_URL, function(에러, client){
   if(에러) return console.log(에러)
   db = client.db('todoapp');
 
 
-  app.listen(7070, function(){
+  app.listen(process.env.PORT, function(){
     console.log('listening on 7070')
   });
 
@@ -28,27 +29,29 @@ app.get('/',function(요청, 응답){
 });
 
 
+
 app.get('/write',function(요청, 응답){
   응답.render(__dirname + '/views/write.ejs')
 });
 
-app.post('/add',function(요청, 응답){
+app.post('/register', function (요청, 응답) {
+  db.collection('login').insertOne({ id: 요청.body.id, pw: 요청.body.pw }, function (에러, 결과) {
+    응답.redirect('/')
+  })
+})
+
+app.post('/add', function (요청, 응답) {
+  console.log(요청.user._id)
   응답.send('전송완료');
-  
-  
-  db.collection('counter').findOne({name : '게시물갯수'}, function(에러, 결과){
-      console.log(결과.totalpost)
-      var 총게시물갯수 = 결과.totalpost;
-
-      db.collection('post').insertOne({_id : 총게시물갯수 + 1 ,제목 : 요청.body.title, 날짜 : 요청.body.date }, function(에러, 결과){
-        console.log('저장완료');
-
-        db.collection('counter').updateOne({name : '게시물갯수'}, { $inc: {totalpost:1}}, function(에러, 결과){
-          if(에러){return console.log(에러)}
-        })
+  db.collection('counter').findOne({ name: '게시물갯수' }, function (에러, 결과) {
+    var 총게시물갯수 = 결과.totalPost;
+    var post = { _id: 총게시물갯수 + 1, 작성자: 요청.user._id , 제목: 요청.body.title, 날짜: 요청.body.date }
+    db.collection('post').insertOne( post , function (에러, 결과) {
+      db.collection('counter').updateOne({ name: '게시물갯수' }, { $inc: { totalPost: 1 } }, function (에러, 결과) {
+        if (에러) { return console.log(에러) }
+      })
+    });
   });
-
-});
 });
 
 
@@ -59,17 +62,36 @@ app.get('/list', function(요청, 응답){
   });
 });
 
+app.get('/search', (요청, 응답)=>{
 
-app.delete('/delete', function(요청, 응답){
-  console.log(요청.body);
-  요청.body._id = parseInt(요청.body._id);
-  db.collection('post').deleteOne(요청.body, function(에러, 결과){
-    console.log('삭제완료');
-    응답.status(200).send({ message : '성공' });
+  var 검색조건 = [
+    {
+      $search: {
+        index: 'titleSearch',
+        text: {
+          query: 요청.query.value,
+          path: '제목'  // 제목날짜 둘다 찾고 싶으면 ['제목', '날짜']
+        }
+      }
+    }
+  ] 
 
+  console.log(요청.query);
+  db.collection('post').aggregate(검색조건).toArray((에러, 결과)=>{
+    console.log(결과)
+    응답.render('search.ejs', {posts : 결과})
   })
-
 })
+
+app.delete('/delete', function (요청, 응답) {
+  요청.body._id = parseInt(요청.body._id);
+  //요청.body에 담겨온 게시물번호를 가진 글을 db에서 찾아서 삭제해주세요
+  db.collection('post').deleteOne({_id : 요청.body._id, 작성자 : 요청.user._id }, function (에러, 결과) {
+    console.log('삭제완료');
+    console.log('에러',에러)
+    응답.status(200).send({ message: '성공했습니다' });
+  })
+});
 
 
 app.get('/detail/:id', function(요청, 응답){
@@ -126,7 +148,8 @@ app.post('/login', passport.authenticate('local', {
 });
 
 app.get('/mypage', 로그인했니, function(요청, 응답){
-  응답.render('mypage.ejs');
+  console.log(요청.user);
+  응답.render('mypage.ejs', {사용자 : 요청.user});
 });
 
 function 로그인했니(요청, 응답, next){
@@ -157,16 +180,16 @@ passport.use(new LocalStrategy({
       return done(null, false, { message: '비번틀렸어요' })
     }
   })
+
 }));
 
 // 로그인 세션 유지
 passport.serializeUser(function(user, done){
-  요청.user
-  done(null, user.id);
+  done(null, user.id)
 });
 
 passport.deserializeUser(function(아이디, done){
-  db.collection('login').findOne({id : 아이디}, function(에러, 결과){
-    done(null, {결과});
+  db.collection('login').findOne({ id : 아이디 }, function(에러, 결과){
+    done(null, 결과)
   })
 });
